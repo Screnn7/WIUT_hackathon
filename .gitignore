@@ -1,0 +1,14 @@
+# raw competition data (provided by the organisers, not redistributed)
+data/
+# local environment and caches
+.venv/
+__pycache__/
+*.pyc
+catboost_info/
+.ipynb_checkpoints/
+# experiment artifacts (features cache, OOF/test predictions, fold models)
+artifacts/
+# predictions for the hidden test set are submitted to the organisers directly
+submission/
+# organisers' task statement (summarised in README.md)
+readme.txt

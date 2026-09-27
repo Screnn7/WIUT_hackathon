@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Alert Escalation Study</title>
+<meta name="description" content="EDA and modelling of AML alert escalation from customers' transaction history — WIUT ML Hackathon, team FB203632.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js"></script>
+<style>
+:root{
+  color-scheme: light;
+  --paper:#f4f5f2; --surface:#fcfcfb; --tile:#eceee9;
+  --ink:#141c19; --ink-2:#48524d; --muted:#7c8681;
+  --rule:#dadfd9; --grid:#e5e8e3; --axis:#c3c8c2;
+  --accent:#1f5f52; --accent-soft:#e1ece8;
+  --s-dis:#2a78d6; --s-esc:#eb6834; --s-3:#1baf7a; --band:rgba(42,120,214,.14);
+  --ok:#11703a; --no:#8a5a4f;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cond:"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --paper:#0f1211; --surface:#161917; --tile:#1c201e;
+    --ink:#eef1ee; --ink-2:#c0c7c2; --muted:#89928d;
+    --rule:#2a2f2c; --grid:#252927; --axis:#3a403c;
+    --accent:#8fd0bf; --accent-soft:#1b2925;
+    --s-dis:#3987e5; --s-esc:#d95926; --s-3:#199e70; --band:rgba(57,135,229,.2);
+    --ok:#5cc47f; --no:#d59a8b;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --paper:#0f1211; --surface:#161917; --tile:#1c201e;
+  --ink:#eef1ee; --ink-2:#c0c7c2; --muted:#89928d;
+  --rule:#2a2f2c; --grid:#252927; --axis:#3a403c;
+  --accent:#8fd0bf; --accent-soft:#1b2925;
+  --s-dis:#3987e5; --s-esc:#d95926; --s-3:#199e70; --band:rgba(57,135,229,.2);
+  --ok:#5cc47f; --no:#d59a8b;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 var(--sans);font-feature-settings:"kern"}
+a{color:var(--accent);text-underline-offset:3px}
+a:focus-visible,summary:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:clamp(16px,4vw,40px)}
+h1,h2,h3{font-family:var(--cond);text-wrap:balance;margin:0;color:var(--ink)}
+h1{font-size:clamp(2.2rem,5.2vw,3.6rem);line-height:1.02;font-weight:600;letter-spacing:-.01em}
+h2{font-size:clamp(1.55rem,3vw,2.1rem);line-height:1.1;font-weight:600}
+h3{font-size:1.12rem;line-height:1.3;font-weight:600}
+p{margin:0}
+.eyebrow{font:500 .74rem/1.2 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.prose{max-width:68ch;display:grid;gap:.85rem;align-content:start;color:var(--ink-2)}
+.prose strong{color:var(--ink);font-weight:600}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+code,.code{font-family:var(--mono);font-size:.88em}
+
+/* hero */
+.hero{padding-block:clamp(28px,6vw,64px) 28px;border-bottom:1px solid var(--rule)}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:clamp(20px,4vw,48px);align-items:start}
+.hero-copy{display:grid;gap:1.1rem}
+.lede{font-size:1.1rem;color:var(--ink-2);max-width:56ch}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin-top:.4rem}
+.stat{background:var(--surface);padding:14px 16px;display:grid;gap:2px;align-content:start}
+.stat .k{font:500 .72rem/1.3 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.stat .v{font:600 1.7rem/1.15 var(--cond);color:var(--ink)}
+.stat .s{font-size:.82rem;color:var(--ink-2)}
+.anatomy{background:var(--surface);border:1px solid var(--rule);padding:16px 16px 8px;display:grid;gap:8px}
+.anatomy .meta{display:flex;flex-wrap:wrap;gap:6px 16px;font:400 .8rem/1.4 var(--mono);color:var(--ink-2)}
+.anatomy .meta b{color:var(--ink);font-weight:500}
+
+/* nav */
+.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--paper) 92%,transparent);backdrop-filter:blur(6px);border-bottom:1px solid var(--rule)}
+.toc ul{list-style:none;margin:0;padding:0;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+.toc a{display:block;padding:10px 10px;font:500 .8rem/1 var(--mono);color:var(--ink-2);text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent}
+.toc a:hover{color:var(--ink);border-bottom-color:var(--accent)}
+
+/* sections */
+section{padding-block:clamp(36px,6vw,64px);border-bottom:1px solid var(--rule);scroll-margin-top:44px}
+.sec-head{display:grid;gap:.5rem;margin-bottom:1.4rem}
+.stack{display:grid;gap:clamp(22px,3.5vw,34px)}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(16px,3vw,28px)}
+.fig{margin:0;background:var(--surface);border:1px solid var(--rule);padding:clamp(14px,2.2vw,20px);display:grid;gap:10px;min-width:0}
+.fig figcaption{display:grid;gap:4px}
+.fig .note{font-size:.9rem;color:var(--ink-2);max-width:78ch}
+.plot{width:100%;height:320px;min-width:0}
+.plot.tall{height:360px}
+.plot.short{height:250px}
+.multi{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.multi .cell{display:grid;gap:2px;min-width:0}
+.multi .cell .t{font:500 .78rem/1.35 var(--mono);color:var(--ink-2)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font:400 .82rem/1.3 var(--sans);color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.legend i{display:inline-block;width:18px;height:3px;border-radius:2px}
+details.datatable{border-top:1px solid var(--rule);padding-top:6px}
+details.datatable summary{cursor:pointer;font:500 .78rem/1.6 var(--mono);color:var(--muted);letter-spacing:.04em;width:max-content}
+.tbl{overflow-x:auto;max-height:360px;margin-top:8px}
+table{border-collapse:collapse;font-size:.84rem;width:100%}
+th,td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font:500 .74rem/1.3 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:var(--surface);position:sticky;top:0}
+td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.schema td:first-child{font-family:var(--mono);font-size:.82rem;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:5px;font:500 .74rem/1 var(--mono);padding:4px 7px;border-radius:3px;white-space:nowrap}
+.badge.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.badge.no{color:var(--no);background:color-mix(in srgb,var(--no) 12%,transparent)}
+.steps{margin:0;padding-left:1.3rem;display:grid;gap:.55rem;color:var(--ink-2);max-width:74ch}
+.steps li::marker{font-family:var(--mono);color:var(--accent)}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.facts div{background:var(--surface);padding:12px 14px;font-size:.92rem;color:var(--ink-2)}
+.facts b{display:block;font:600 1.05rem/1.3 var(--cond);color:var(--ink);margin-bottom:2px}
+.cv-grid{display:grid;gap:5px;max-width:520px}
+.cv-row{display:grid;grid-template-columns:78px repeat(5,1fr);gap:4px;align-items:center;font:400 .74rem/1 var(--mono);color:var(--muted)}
+.cv-row span.c{height:22px;background:var(--tile);border:1px solid var(--rule)}
+.cv-row span.v{background:var(--s-dis);border-color:var(--s-dis)}
+pre{background:var(--tile);border:1px solid var(--rule);padding:14px 16px;overflow-x:auto;font:400 .84rem/1.55 var(--mono);color:var(--ink);margin:0}
+.callout{border-left:3px solid var(--accent);padding:4px 0 4px 14px;color:var(--ink-2);max-width:74ch}
+footer{padding-block:28px 48px;color:var(--muted);font-size:.85rem}
+@media (max-width:860px){
+  .hero-grid,.two{grid-template-columns:1fr}
+  .facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:520px){
+  .facts,.stats{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow">WIUT ML Hackathon 2026 · Team FB203632</p>
+      <h1>Which alerts get escalated?</h1>
+      <p class="lede">%%LEDE%%</p>
+      <div class="stats">%%STATS%%</div>
+    </div>
+    <figure class="anatomy" aria-labelledby="anat-t">
+      <p class="eyebrow" id="anat-t">Anatomy of one alert</p>
+      <div class="meta">%%ANATOMY_META%%</div>
+      <div id="plot-anatomy" class="plot short" role="img" aria-label="Daily transaction counts of one alert over 180 days, followed by the final burst"></div>
+      <p class="note" style="font-size:.84rem;color:var(--ink-2)">%%ANATOMY_NOTE%%</p>
+    </figure>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <div class="wrap"><ul>
+    <li><a href="#approach">Approach</a></li><li><a href="#data">Data</a></li><li><a href="#target">Target</a></li>
+    <li><a href="#behaviour">Behaviour</a></li><li><a href="#contrast">Escalated vs dismissed</a></li>
+    <li><a href="#features">Features</a></li><li><a href="#models">Validation &amp; models</a></li>
+    <li><a href="#conclusions">Conclusions</a></li><li><a href="#reproduce">Reproduce</a></li>
+  </ul></div>
+</nav>
+
+<main class="wrap">
+<section id="approach">
+  <div class="sec-head"><p class="eyebrow">Approach</p><h2>One alert, one row: summarise the history, then let cross-validation decide</h2></div>
+  <div class="stack">
+    <div class="prose">%%APPROACH_INTRO%%</div>
+    <ol class="steps">%%APPROACH_STEPS%%</ol>
+  </div>
+</section>
+
+<section id="data">
+  <div class="sec-head"><p class="eyebrow">The data</p><h2>Four files, one relational key</h2></div>
+  <div class="stack">
+    <div class="tbl" style="max-height:none"><table class="schema">
+      <thead><tr><th>File</th><th>One row per</th><th class="n">Rows</th><th>Columns</th></tr></thead>
+      <tbody>%%SCHEMA%%</tbody></table></div>
+    <div class="facts">%%DATA_FACTS%%</div>
+    <figure class="fig">
+      <figcaption><h3>Train and test alerts are interleaved over the same 24 months</h3>
+        <p class="note">%%NOTE_TIMELINE%%</p></figcaption>
+      <div class="legend"><span><i style="background:var(--s-dis)"></i>train alerts</span><span><i style="background:var(--s-3)"></i>test alerts</span></div>
+      <div id="plot-timeline" class="plot short"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-timeline"></div></details>
+    </figure>
+    <div class="two">
+      <figure class="fig">
+        <figcaption><h3>About %%NTX_MEDIAN%% transactions behind a typical alert</h3><p class="note">%%NOTE_NTX%%</p></figcaption>
+        <div class="legend"><span><i style="background:var(--s-dis)"></i>dismissed</span><span><i style="background:var(--s-esc)"></i>escalated</span><span><i style="background:var(--s-3)"></i>test</span></div>
+        <div id="plot-ntx" class="plot short"></div>
+        <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-ntx"></div></details>
+      </figure>
+      <figure class="fig">
+        <figcaption><h3>Nearly every alert has the full 180-day window</h3><p class="note">%%NOTE_SPAN%%</p></figcaption>
+        <div id="plot-span" class="plot short"></div>
+        <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-span"></div></details>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="target">
+  <div class="sec-head"><p class="eyebrow">Target</p><h2>%%TARGET_H2%%</h2></div>
+  <div class="stack">
+    <figure class="fig">
+      <figcaption><h3>The monthly escalation rate is consistent with a constant</h3><p class="note">%%NOTE_RATE%%</p></figcaption>
+      <div class="legend"><span><i style="background:var(--s-dis)"></i>monthly rate with 95 % interval</span><span><i style="background:var(--muted)"></i>overall rate</span></div>
+      <div id="plot-rate" class="plot short"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-rate"></div></details>
+    </figure>
+  </div>
+</section>
+
+<section id="behaviour">
+  <div class="sec-head"><p class="eyebrow">Transaction behaviour</p><h2>Activity fades before the alert, then a burst lands in its last minutes</h2></div>
+  <div class="stack">
+    <figure class="fig">
+      <figcaption><h3>Transactions per alert per day, and the final burst</h3><p class="note">%%NOTE_ACTIVITY%%</p></figcaption>
+      <div class="legend"><span><i style="background:var(--s-dis)"></i>dismissed</span><span><i style="background:var(--s-esc)"></i>escalated</span></div>
+      <div class="two">
+        <div class="multi" style="grid-template-columns:1fr"><div class="cell"><span class="t">days before the alert date (burst excluded)</span><div id="plot-activity" class="plot short"></div></div></div>
+        <div class="multi" style="grid-template-columns:1fr"><div class="cell"><span class="t">last 10 minutes before 00:00 of the alert date, 10-second bins</span><div id="plot-burst" class="plot short"></div></div></div>
+      </div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-activity"></div></details>
+    </figure>
+    <figure class="fig">
+      <figcaption><h3>Incoming versus outgoing, and the mix of transaction types, barely differ by outcome</h3><p class="note">%%NOTE_SHARES%%</p></figcaption>
+      <div class="legend"><span><i style="background:var(--s-dis)"></i>dismissed</span><span><i style="background:var(--s-esc)"></i>escalated</span></div>
+      <div class="multi" id="multi-shares"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-shares"></div></details>
+    </figure>
+    <figure class="fig">
+      <figcaption><h3>One global amount scale, a different level for each transaction type</h3><p class="note">%%NOTE_AMOUNTS%%</p></figcaption>
+      <div class="legend"><span><i style="background:var(--s-dis)"></i>incoming (kirim)</span><span><i style="background:var(--s-3)"></i>outgoing (chiqim)</span></div>
+      <div class="multi" id="multi-amounts"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-amounts"></div></details>
+    </figure>
+    <figure class="fig">
+      <figcaption><h3>Time of day carries no signal</h3><p class="note">%%NOTE_HOUR%%</p></figcaption>
+      <div class="legend"><span><i style="background:var(--s-dis)"></i>dismissed</span><span><i style="background:var(--s-esc)"></i>escalated</span></div>
+      <div id="plot-hour" class="plot short"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-hour"></div></details>
+    </figure>
+  </div>
+</section>
+
+<section id="contrast">
+  <div class="sec-head"><p class="eyebrow">Escalated vs dismissed</p><h2>Escalated alerts move smaller amounts, especially by bank transfer</h2></div>
+  <div class="stack">
+    <figure class="fig">
+      <figcaption><h3>Density of escalated relative to dismissed, by amount percentile</h3><p class="note">%%NOTE_RATIO%%</p></figcaption>
+      <div class="legend"><span><i style="background:var(--s-dis)"></i>incoming (kirim)</span><span><i style="background:var(--s-3)"></i>outgoing (chiqim)</span><span><i style="background:var(--muted)"></i>no difference (ratio 1)</span></div>
+      <div class="multi" id="multi-ratio"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-ratio"></div></details>
+    </figure>
+    <figure class="fig">
+      <figcaption><h3>Every single feature is weak on its own</h3><p class="note">%%NOTE_UNI%%</p></figcaption>
+      <div id="plot-uni" class="plot" style="height:560px"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-uni"></div></details>
+    </figure>
+    <figure class="fig">
+      <figcaption><h3>…but the effects are steady and monotone</h3><p class="note">%%NOTE_DEC%%</p></figcaption>
+      <div class="multi" id="multi-dec"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-dec"></div></details>
+    </figure>
+  </div>
+</section>
+
+<section id="features">
+  <div class="sec-head"><p class="eyebrow">From findings to features</p><h2>%%FEAT_H2%%</h2></div>
+  <div class="stack">
+    <div class="prose">%%FEAT_INTRO%%</div>
+    <div class="tbl" style="max-height:none"><table>
+      <thead><tr><th>Family</th><th>What it measures</th><th>Motivated by</th><th class="n">Δ AUC r42 / r43 / r44</th><th class="n">Mean Δ</th><th>Decision</th></tr></thead>
+      <tbody>%%ABLATION_ROWS%%</tbody></table></div>
+    <p class="callout">%%FEAT_NOTE%%</p>
+  </div>
+</section>
+
+<section id="models">
+  <div class="sec-head"><p class="eyebrow">Validation &amp; models</p><h2>%%MODELS_H2%%</h2></div>
+  <div class="stack">
+    <div class="two">
+      <div class="prose">%%VALIDATION_TEXT%%</div>
+      <div class="fig" style="align-content:start">
+        <p class="eyebrow">Repeated stratified 5-fold, 3 repeats</p>
+        <div class="cv-grid" id="cv-grid" aria-label="Fold diagram: in each repeat every fold is the validation fold once"></div>
+        <p class="note" style="font-size:.84rem;color:var(--ink-2)">Blue: validation fold. Every fitted statistic (thresholds, normalisation, PCA, feature selection, the model) sees only the other four folds. Hyper-parameters, the feature-selection threshold and the spline penalty were chosen on separate tuning repeats (seeds 100 and 101), never on the three scoring repeats.</p>
+      </div>
+    </div>
+    <figure class="fig">
+      <figcaption><h3>Cross-validated ROC-AUC by model</h3><p class="note">%%NOTE_MODELS%%</p></figcaption>
+      <div id="plot-models" class="plot short"></div>
+      <details class="datatable" open><summary>Data table</summary><div class="tbl" id="tbl-models"></div></details>
+    </figure>
+    <figure class="fig">
+      <figcaption><h3>What the final LightGBM relies on</h3><p class="note">%%NOTE_IMP%%</p></figcaption>
+      <div id="plot-imp" class="plot" style="height:520px"></div>
+      <details class="datatable"><summary>Data table</summary><div class="tbl" id="tbl-imp"></div></details>
+    </figure>
+  </div>
+</section>
+
+<section id="conclusions">
+  <div class="sec-head"><p class="eyebrow">Conclusions</p><h2>What we learned</h2></div>
+  <div class="two">
+    <div class="prose">%%CONCLUSIONS%%</div>
+    <div class="prose">%%LIMITS%%</div>
+  </div>
+</section>
+
+<section id="reproduce">
+  <div class="sec-head"><p class="eyebrow">Reproduce</p><h2>Everything runs from the repository</h2></div>
+  <div class="stack">
+    <div class="prose">%%REPRO_TEXT%%</div>
+    <pre>%%REPRO_CODE%%</pre>
+  </div>
+</section>
+</main>
+<footer><div class="wrap">%%FOOTER%%</div></footer>
+
+<script>const D = /*__EDA__*/null; const M = /*__MODEL__*/null;</script>
+<script>
+(function(){
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (v, d=3) => v == null ? '–' : Number(v).toFixed(d);
+const pct = (v, d=1) => v == null ? '–' : (100*v).toFixed(d) + ' %';
+function T(){ return {paper:css('--surface'), ink:css('--ink'), ink2:css('--ink-2'), muted:css('--muted'), grid:css('--grid'),
+  axis:css('--axis'), dis:css('--s-dis'), esc:css('--s-esc'), s3:css('--s-3'), band:css('--band'), accent:css('--accent')}; }
+function base(t, lay){
+  const ax = {gridcolor:t.grid, linecolor:t.axis, zerolinecolor:t.axis, tickfont:{color:t.muted, family:'IBM Plex Mono, monospace', size:11},
+    title:{font:{color:t.ink2, size:12}}, automargin:true, fixedrange:true};
+  const L = {paper_bgcolor:t.paper, plot_bgcolor:t.paper, font:{family:'IBM Plex Sans, system-ui, sans-serif', size:12, color:t.ink2},
+    margin:{l:48, r:12, t:8, b:40}, showlegend:false, hovermode:'x unified',
+    hoverlabel:{bgcolor:t.paper, bordercolor:t.axis, font:{color:t.ink, family:'IBM Plex Mono, monospace', size:12}},
+    xaxis:Object.assign({}, ax), yaxis:Object.assign({}, ax)};
+  for (const k in lay){ if (k==='xaxis'||k==='yaxis') Object.assign(L[k], lay[k]); else L[k] = lay[k]; }
+  return L;
+}
+const CH = [];
+function chart(id, fn){ CH.push([id, fn]); }
+function render(){ const t = T(); for (const [id, fn] of CH){ const el = document.getElementById(id); if (!el) continue;
+  const o = fn(t); Plotly.react(el, o.data, base(t, o.layout || {}), {displayModeBar:false, responsive:true}); } }
+function line(x, y, color, name, extra){ return Object.assign({type:'scatter', mode:'lines', x, y, name, line:{color, width:2, shape:'linear'},
+  hovertemplate:'%{y:.4f}<extra>'+name+'</extra>'}, extra||{}); }
+function table(id, head, rows){ const el = document.getElementById(id); if (!el) return;
+  el.innerHTML = '<table><thead><tr>' + head.map((h,i)=>'<th'+(i?' class="n"':'')+'>'+h+'</th>').join('') + '</tr></thead><tbody>' +
+    rows.map(r=>'<tr>'+r.map((c,i)=>'<td'+(i?' class="n"':'')+'>'+c+'</td>').join('')+'</tr>').join('') + '</tbody></table>'; }
+function multi(id, items){ const el = document.getElementById(id); el.innerHTML = items.map((it,i)=>
+  '<div class="cell"><span class="t">'+it+'</span><div id="'+id+'-'+i+'" class="plot short"></div></div>').join(''); }
+
+// ---------- anatomy of one alert
+chart('plot-anatomy', t => { const days = D.example.days, n = days.length;
+  const x = days.map((_,i)=> -(n - i)); return {data:[
+    {type:'bar', x, y:days, marker:{color:t.dis}, name:'transactions per day', hovertemplate:'%{y} tx, %{x} days<extra></extra>'},
+    {type:'bar', x:[4], y:[D.example.burst], marker:{color:t.esc}, name:'final burst', width:[4], hovertemplate:D.example.burst+' tx in '+D.example.burst_minutes.toFixed(1)+' min<extra>burst</extra>'}],
+  layout:{bargap:0.15, margin:{l:34,r:8,t:6,b:34}, hovermode:'closest',
+    xaxis:{title:{text:'days before the alert date'}, tickvals:[-180,-150,-120,-90,-60,-30,4], ticktext:['180','150','120','90','60','30','burst']},
+    yaxis:{title:{text:'transactions'}},
+    annotations:[{x:4, y:D.example.burst, text:D.example.burst+' tx in '+D.example.burst_minutes.toFixed(1)+' min →', showarrow:false, xanchor:'right', xshift:-8, yshift:-2, font:{size:11, color:t.ink2, family:'IBM Plex Mono'}}]}}; });
+
+// ---------- data
+chart('plot-timeline', t => ({data:[line(D.months.m, D.months.train, t.dis, 'train', {mode:'lines+markers', marker:{size:6}}),
+  line(D.months.m, D.months.test, t.s3, 'test', {mode:'lines+markers', marker:{size:6}})],
+  layout:{yaxis:{title:{text:'alerts per month'}, rangemode:'tozero'}, xaxis:{type:'category', tickangle:-45, nticks:12}}}));
+table('tbl-timeline', ['Month','Train alerts','Test alerts','Test share'], D.months.m.map((m,i)=>[m, D.months.train[i], D.months.test[i], pct(D.months.test[i]/(D.months.test[i]+D.months.train[i]))]));
+const lx = D.ntx_hist.x;
+chart('plot-ntx', t => ({data:[line(lx, D.ntx_hist.dismissed, t.dis, 'dismissed', {line:{color:t.dis, width:2, shape:'hvh'}}),
+  line(lx, D.ntx_hist.escalated, t.esc, 'escalated', {line:{color:t.esc, width:2, shape:'hvh'}}),
+  line(lx, D.ntx_hist.test, t.s3, 'test', {line:{color:t.s3, width:1.5, shape:'hvh'}})],
+  layout:{xaxis:{title:{text:'transactions per alert (log scale)'}, tickvals:[0,1,2,3], ticktext:['1','10','100','1,000']}, yaxis:{title:{text:'density'}}}}));
+table('tbl-ntx', ['Transactions (bin centre)','Dismissed','Escalated','Test'], lx.map((v,i)=>[Math.round(Math.pow(10,v)).toLocaleString('en-US'), fmt(D.ntx_hist.dismissed[i]), fmt(D.ntx_hist.escalated[i]), fmt(D.ntx_hist.test[i])]));
+chart('plot-span', t => ({data:[line(D.span_ecdf.x, D.span_ecdf.y, t.dis, 'share of alerts')],
+  layout:{xaxis:{title:{text:'days from first transaction to alert date'}}, yaxis:{title:{text:'share of alerts (cumulative)'}, tickformat:'.0%'}}}));
+table('tbl-span', ['History length ≤ days','Share of alerts'], D.span_ecdf.x.filter((_,i)=>i%5==0).map((v,j)=>[v, pct(D.span_ecdf.y[j*5])]));
+
+// ---------- target
+chart('plot-rate', t => ({data:[
+  {type:'scatter', mode:'lines', x:D.months.m, y:D.months.hi, line:{width:0}, hoverinfo:'skip', showlegend:false},
+  {type:'scatter', mode:'lines', x:D.months.m, y:D.months.lo, line:{width:0}, fill:'tonexty', fillcolor:t.band, hoverinfo:'skip', showlegend:false},
+  line(D.months.m, D.months.rate, t.dis, 'escalation rate', {mode:'lines+markers', marker:{size:6}, hovertemplate:'%{y:.1%}<extra>rate</extra>'}),
+  line(D.months.m, D.months.m.map(()=>D.rate), t.muted, 'overall', {line:{color:t.muted, width:1}, hovertemplate:'%{y:.1%}<extra>overall</extra>'})],
+  layout:{yaxis:{tickformat:'.0%', title:{text:'escalated share'}}, xaxis:{type:'category', tickangle:-45, nticks:12}}}));
+table('tbl-rate', ['Month','Escalation rate','95 % low','95 % high','Alerts'], D.months.m.map((m,i)=>[m, pct(D.months.rate[i]), pct(D.months.lo[i]), pct(D.months.hi[i]), D.months.train[i]]));
+
+// ---------- behaviour
+chart('plot-activity', t => ({data:[line(D.activity.lag, D.activity.dismissed, t.dis, 'dismissed'), line(D.activity.lag, D.activity.escalated, t.esc, 'escalated')],
+  layout:{xaxis:{autorange:'reversed', title:{text:'days before the alert date'}}, yaxis:{title:{text:'tx per alert per day'}}}}));
+chart('plot-burst', t => ({data:[line(D.burst.min, D.burst.dismissed, t.dis, 'dismissed'), line(D.burst.min, D.burst.escalated, t.esc, 'escalated')],
+  layout:{xaxis:{autorange:'reversed', title:{text:'minutes before 00:00'}}, yaxis:{title:{text:'tx per alert per 10 s'}}}}));
+table('tbl-activity', ['Days before','Dismissed tx/day','Escalated tx/day'], D.activity.lag.filter((_,i)=>i%10==0).map((l,j)=>[l, fmt(D.activity.dismissed[j*10]), fmt(D.activity.escalated[j*10])]));
+multi('multi-shares', D.shares.map(s=>'share '+s.name+' · AUC '+s.auc.toFixed(3)));
+D.shares.forEach((s,i)=> chart('multi-shares-'+i, t => ({data:[line(s.x, s.dismissed, t.dis, 'dismissed', {line:{color:t.dis,width:2,shape:'hvh'}}), line(s.x, s.escalated, t.esc, 'escalated', {line:{color:t.esc,width:2,shape:'hvh'}})],
+  layout:{margin:{l:30,r:6,t:4,b:30}, xaxis:{tickformat: Math.max(...s.x) < 0.1 ? '.1%' : '.0%', nticks:5}, yaxis:{showticklabels:false}}})));
+table('tbl-shares', ['Per-alert share','Mean, dismissed','Mean, escalated','AUC'], D.shares.map(s=>[s.name, pct(s.mean_dis,2), pct(s.mean_esc,2), s.auc.toFixed(4)]));
+multi('multi-amounts', D.amounts.map(a=>a.type+' · n='+a.n.toLocaleString('en-US')+' · floor '+a.floor.toFixed(2)+', cap '+a.cap.toFixed(2)));
+D.amounts.forEach((a,i)=> chart('multi-amounts-'+i, t => ({data:[line(a.x, a.in, t.dis, 'incoming', {line:{color:t.dis,width:2,shape:'hvh'}}), line(a.x, a.out, t.s3, 'outgoing', {line:{color:t.s3,width:2,shape:'hvh'}})],
+  layout:{margin:{l:30,r:6,t:4,b:30}, xaxis:{title:{text:'miqdor_indeksi'}}, yaxis:{showticklabels:false}}})));
+table('tbl-amounts', ['Type','Transactions','Floor','Cap'], D.amounts.map(a=>[a.type, a.n.toLocaleString('en-US'), a.floor.toFixed(4), a.cap.toFixed(4)]));
+chart('plot-hour', t => ({data:[line(D.hour.h, D.hour.dismissed, t.dis, 'dismissed', {mode:'lines+markers', marker:{size:6}}), line(D.hour.h, D.hour.escalated, t.esc, 'escalated', {mode:'lines+markers', marker:{size:6}})],
+  layout:{xaxis:{title:{text:'hour of day (burst excluded)'}, dtick:2}, yaxis:{tickformat:'.1%', rangemode:'tozero', title:{text:'share of transactions'}}}}));
+table('tbl-hour', ['Hour','Dismissed','Escalated'], D.hour.h.map((h,i)=>[h, pct(D.hour.dismissed[i],2), pct(D.hour.escalated[i],2)]));
+
+// ---------- contrast
+multi('multi-ratio', D.ratio.map(r=>r.type));
+D.ratio.forEach((r,i)=> chart('multi-ratio-'+i, t => ({data:[line(D.ratio_pct, r.in, t.dis, 'incoming', {mode:'lines+markers', marker:{size:5}}), line(D.ratio_pct, r.out, t.s3, 'outgoing', {mode:'lines+markers', marker:{size:5}}),
+  line([0,100],[1,1], t.muted, 'ratio 1', {line:{color:t.muted,width:1}, hoverinfo:'skip'})],
+  layout:{margin:{l:34,r:6,t:4,b:34}, xaxis:{title:{text:'amount percentile'}, range:[0,100]}, yaxis:{range:[0.55,1.5]}}})));
+table('tbl-ratio', ['Amount percentile'].concat(D.ratio.flatMap(r=>[r.type+' in', r.type+' out'])), D.ratio_pct.map((p,i)=>[p].concat(D.ratio.flatMap(r=>[fmt(r.in[i],2), fmt(r.out[i],2)]))));
+const U = D.univariate.slice().reverse();
+chart('plot-uni', t => ({data:[{type:'bar', orientation:'h', y:U.map(u=>u.feature), x:U.map(u=>u.auc-0.5), marker:{color:t.dis}, width:0.6,
+  customdata:U.map(u=>u.auc.toFixed(3)), hovertemplate:'AUC %{customdata}<extra></extra>'}],
+  layout:{hovermode:'closest', margin:{l:8,r:16,t:4,b:44}, xaxis:{title:{text:'AUC − 0.5   (left: lower when escalated · right: higher when escalated)'}, range:[-0.085,0.05], zeroline:true, zerolinecolor:t.ink2},
+    yaxis:{automargin:true, tickfont:{size:11}, ticksuffix:'  '},
+    annotations:U.map(u=>({x:u.auc-0.5, y:u.feature, text:u.auc.toFixed(3), showarrow:false, xanchor:u.auc<0.5?'right':'left', xshift:u.auc<0.5?-4:4, font:{size:11, family:'IBM Plex Mono', color:t.ink2}}))}}));
+table('tbl-uni', ['Per-alert feature','AUC alone'], D.univariate.map(u=>[u.feature, u.auc.toFixed(4)]));
+multi('multi-dec', D.deciles.map(d=>d.name+' · AUC '+d.auc.toFixed(3)));
+const dx = [1,2,3,4,5,6,7,8,9,10];
+D.deciles.forEach((d,i)=> chart('multi-dec-'+i, t => ({data:[
+  {type:'scatter', mode:'lines', x:dx, y:d.hi, line:{width:0}, hoverinfo:'skip'},
+  {type:'scatter', mode:'lines', x:dx, y:d.lo, line:{width:0}, fill:'tonexty', fillcolor:t.band, hoverinfo:'skip'},
+  line(dx, d.rate, t.dis, 'escalation rate', {mode:'lines+markers', marker:{size:5}, hovertemplate:'%{y:.1%}<extra>decile %{x}</extra>'}),
+  line([1,10],[D.rate,D.rate], t.muted, 'overall', {line:{color:t.muted,width:1}, hoverinfo:'skip'})],
+  layout:{margin:{l:38,r:6,t:4,b:30}, xaxis:{dtick:1, title:{text:'decile'}}, yaxis:{tickformat:'.0%', range:[0.08,0.27]}, hovermode:'closest'}})));
+table('tbl-dec', ['Feature'].concat(dx.map(v=>'D'+v)), D.deciles.map(d=>[d.name].concat(d.rate.map(v=>pct(v)))));
+
+// ---------- models
+const g = document.getElementById('cv-grid'); let h = '';
+for (let k=0;k<5;k++){ h += '<div class="cv-row"><span>model '+(k+1)+'</span>' + [0,1,2,3,4].map(j=>'<span class="c'+(j===k?' v':'')+'"></span>').join('') + '</div>'; }
+h += '<div class="cv-row" style="grid-template-columns:78px 1fr"><span></span><span style="color:var(--ink-2)">× 3 repeats, reshuffled with seeds 42 / 43 / 44 → 15 models per configuration</span></div>';
+g.innerHTML = h;
+chart('plot-models', t => ({data:[{type:'bar', x:M.models.map(m=>m.short), y:M.models.map(m=>m.mean),
+  error_y:{type:'data', array:M.models.map(m=>m.std), color:t.ink2, thickness:1.5, width:5},
+  marker:{color:M.models.map(m=>m.final ? t.esc : t.dis)}, width:0.55, hovertemplate:'%{x}: %{y:.4f}<extra></extra>'}],
+  layout:{hovermode:'closest', yaxis:{range:[M.ymin, M.ymax], title:{text:'OOF ROC-AUC'}}, xaxis:{tickangle:0}}}));
+table('tbl-models', ['Model','r42','r43','r44','Mean','Sd'], M.models.map(m=>[m.label + (m.final?' — submitted':''), fmt(m.r[0],4), fmt(m.r[1],4), fmt(m.r[2],4), fmt(m.mean,4), fmt(m.std,4)]));
+const I = M.importance.slice().reverse();
+chart('plot-imp', t => ({data:[{type:'bar', orientation:'h', y:I.map(v=>v.label), x:I.map(v=>v.share), marker:{color:t.dis}, width:0.6,
+  hovertemplate:'%{x:.1%} of total gain<extra></extra>'}],
+  layout:{hovermode:'closest', margin:{l:8,r:16,t:4,b:40}, xaxis:{tickformat:'.1%', title:{text:'share of total gain importance (mean over fold models)'}}, yaxis:{automargin:true, tickfont:{size:11}}}}));
+table('tbl-imp', ['Feature','Family','Share of gain'], M.importance.map(v=>[v.feature, v.family, pct(v.share,2)]));
+
+render();
+if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+new MutationObserver(render).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+})();
+</script>
+</body>
+</html>
