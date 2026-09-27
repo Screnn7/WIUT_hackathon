@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import ART, REPEAT_SEEDS, TUNE_SEED  # noqa: E402
 from src.cv import get_folds, load_result, mean_auc, run_cv  # noqa: E402
 from src.logbook import decide, fmt_auc, fmt_cmp, load_state, log_line, save_state  # noqa: E402
-from src.models import CAT, LGBM, XGB, LRSpline  # noqa: E402
+from src.models import CAT, LGBM, XGB, LGBMMono, LRSpline  # noqa: E402
 from src.store import FeatureStore  # noqa: E402
 
 FAMILY_TEXT = {
@@ -36,6 +36,8 @@ def model_from(spec):
     t = spec["type"]
     if t == "lgb":
         return LGBM(spec.get("params"), spec["n_estimators"])
+    if t == "lgb_mono":
+        return LGBMMono(spec.get("params"), spec["n_estimators"], **spec.get("mono", {}))
     if t == "xgb":
         return XGB(spec.get("params"), spec["n_estimators"])
     if t == "cat":

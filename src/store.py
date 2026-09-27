@@ -7,6 +7,7 @@ import pandas as pd
 from .config import CACHE
 from .data import load_signals, load_tx
 from .features import BASE_FAMILIES, FOLD_FAMILIES, FoldFeaturizer, build_base
+from .features_extra import EXTRA_FAMILIES, FoldExtra, fi_interactions, knn_features, llr_features
 
 
 def family_of(col):
@@ -41,16 +42,34 @@ class FeatureStore:
         return [c for c in self.base["train"].columns if family_of(c) in families]
 
     def matrix(self, families, fit_idx):
-        """(X_train_all_signals, X_test). Fold-dependent parts are fitted on train signals `fit_idx` only."""
-        unknown = set(families) - set(BASE_FAMILIES) - set(FOLD_FAMILIES)
+        """(X_train_all_signals, X_test). Fold-dependent parts are fitted on train signals `fit_idx` only;
+        supervised parts (fk, fl) never use a training alert's own label for that alert's feature."""
+        unknown = set(families) - set(BASE_FAMILIES) - set(FOLD_FAMILIES) - set(EXTRA_FAMILIES)
         assert not unknown, unknown
+        fit_idx = np.asarray(fit_idx)
+        n_tr, n_te = len(self.y), len(self.sig["test"])
         cols = self.columns(families)
         xtr, xte = self.base["train"][cols], self.base["test"][cols]
         fold_parts = [f for f in FOLD_FAMILIES if f in families]
         if fold_parts:
-            ff = FoldFeaturizer(fold_parts).fit(self.all_arrays["train"], self.f1["train"], np.asarray(fit_idx))
+            ff = FoldFeaturizer(fold_parts).fit(self.all_arrays["train"], self.f1["train"], fit_idx)
             xtr = pd.concat([xtr, ff.transform(self.all_arrays["train"], self.f1["train"])], axis=1)
             xte = pd.concat([xte, ff.transform(self.all_arrays["test"], self.f1["test"])], axis=1)
+        extra_unsup = [f for f in ("fh", "fr") if f in families]
+        if extra_unsup:
+            fe = FoldExtra(extra_unsup).fit(self.all_arrays["train"], fit_idx)
+            xtr = pd.concat([xtr, fe.transform(self.all_arrays["train"], n_tr)], axis=1)
+            xte = pd.concat([xte, fe.transform(self.all_arrays["test"], n_te)], axis=1)
+        if "fi" in families:
+            xtr = pd.concat([xtr, fi_interactions(self.f1["train"])], axis=1)
+            xte = pd.concat([xte, fi_interactions(self.f1["test"])], axis=1)
+        if "fk" in families:
+            a, b = knn_features(self.f1["train"], self.f1["test"], self.y, fit_idx)
+            xtr, xte = pd.concat([xtr, a], axis=1), pd.concat([xte, b], axis=1)
+        if "fl" in families:
+            a, b = llr_features(self.all_arrays["train"], self.all_arrays["test"], self.y, fit_idx, n_te,
+                                seed=int(fit_idx.sum() % 100_000))
+            xtr, xte = pd.concat([xtr, a], axis=1), pd.concat([xte, b], axis=1)
         assert list(xtr.columns) == list(xte.columns), "train/test feature mismatch"
         assert xtr.columns.is_unique
         return xtr, xte

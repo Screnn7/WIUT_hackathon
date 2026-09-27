@@ -29,6 +29,11 @@ FAMILY = {
     "f7": ("F7 · Contrasts", "last transaction, last-10 mean vs history, 7/30-day vs history, burst amount rank inside own history", "Kaggle AmEx: last − mean features"),
     "f6": ("F6 · Alert date", "month, weekday, year", "monthly rate varies 14–21 %"),
     "txm": ("Transaction-level model", "nested GPU XGBoost scoring single transactions; 9 aggregates of its scores per alert", "Kaggle AmEx 1st place"),
+    "fi": ("fi · Cell interactions", "amount level of each cell minus the alert's overall level, outgoing − incoming, bank − card, share × level", "trees need many splits to form differences of two features"),
+    "fk": ("kNN target mean", "escalation rate among the 50/200/500 nearest training alerts in the amount-level space (training rows leave-one-out)", "Kaggle Home Credit 1st place"),
+    "fl": ("Class density ratio", "log(p_escalated / p_dismissed) of each amount inside its cell (20 bins, fitted without the alert's own label), averaged", "naive-Bayes view of the density ratio chart"),
+    "fh": ("Amount histograms", "share of an alert's transactions in each of 10 decile bins per cell (edges fitted on the training fold)", "full distribution shape instead of 5 quantiles"),
+    "fr": ("Rank / Yeo-Johnson amounts", "mean and sd of within-cell ECDF rank, mean of Yeo-Johnson-transformed amount (fitted on the training fold)", "robust and variance-stabilised levels"),
 }
 TYPE_NAME = {"karta": "card", "bank": "bank transfer", "naqd": "cash", "xalq": "international"}
 
@@ -47,6 +52,22 @@ def pretty(col):
     if fam == "f1":
         where = " ".join(cell) if cell else "all"
         return f"{stat.get(parts[-1], parts[-1])} · {where}"
+    where = " ".join(cell)
+    if fam == "fi":
+        special = {"bank_out_minus_in": "bank transfer level: outgoing − incoming", "karta_out_minus_in": "card level: outgoing − incoming",
+                   "bank_minus_karta": "level: bank transfer − card", "logn_x_mean": "log count × overall level"}
+        if rest in special:
+            return special[rest]
+        if rest.endswith("_mean_minus_all"):
+            return f"{where} level − overall level"
+        if rest.endswith("_share_x_mean"):
+            return f"{where} share × level"
+    if fam == "fx":
+        sig = rest.split("_exp")[1].split("_")[0]
+        return f"mean exp({sig}·amount) · {where or 'all'}"
+    if fam == "f7":
+        return {"w7_m_minus_all": "7-day mean amount − history mean", "w30_m_minus_all": "30-day mean amount − history mean",
+                "last10_m_minus_all": "last-10 mean amount − history mean"}.get(rest, rest.replace("_", " "))
     return rest.replace("_", " ")
 
 
@@ -67,11 +88,12 @@ def parse_log():
 def ablation_rows(log):
     out = []
     for r in log:
-        m = re.match(r"(Раунд 2: )?\+(\w+):", r["hyp"])
+        m = re.match(r"(Раунд 2: |Фаза 3: |Фаза 3, перепроверка против новой базы: )?\+(\w+)(:|$)", r["hyp"])
         fam = None
         rnd = None
-        if m:
-            fam, rnd = m.group(2), (2 if m.group(1) else 1)
+        if m and m.group(2) in FAMILY:
+            fam = m.group(2)
+            rnd = {None: 1, "Раунд 2: ": 2, "Фаза 3: ": 3}.get(m.group(1), "3R")
         elif r["hyp"].startswith("2b: модель уровня транзакций"):
             fam, rnd = "txm", 2
         if fam is None or r["d"] is None:
@@ -92,13 +114,15 @@ def models_block(st):
         v = [res["auc"][s] for s in REPEAT_SEEDS]
         y_models.append({"label": label, "short": short, "r": v, "mean": float(np.mean(v)), "std": float(np.std(v)), "final": final})
     add("Baseline B0: LightGBM on F1+F2", "B0 baseline", "B0")
-    add("LightGBM on F1+F2+F7", "LightGBM", st["best"])
+    fam_lbl = "+".join(f.upper() if f[1].isdigit() else f for f in st["families"])
+    ens = st.get("ensemble") or {}
+    single = ens.get("members") == ["lgb"]
+    add(f"LightGBM on {fam_lbl}" + (" (Platt-calibrated)" if single else ""), "LightGBM", st["best"], final=single)
     for k, lab, sh in (("xgb", "XGBoost (GPU), tuned", "XGBoost"), ("cat", "CatBoost (CPU), tuned", "CatBoost"),
                        ("lrs", "LogReg + splines (additive)", "LogReg+splines")):
         if k in st.get("members", {}):
             add(lab, sh, st["members"][k]["result"])
-    ens = st.get("ensemble")
-    if ens:
+    if ens and not single:
         v = [ens["auc"][str(s)] if str(s) in ens["auc"] else ens["auc"][s] for s in REPEAT_SEEDS]
         mem_names = {"lgb": "LightGBM", "xgb": "XGBoost", "cat": "CatBoost", "lrs": "LogReg+splines"}
         y_models.append({"label": "Ensemble: " + " + ".join(mem_names.get(m, m) for m in ens["members"]), "short": "Ensemble",
@@ -164,7 +188,7 @@ def main():
                            f"Each was first tested on this data; {n_exp} experiments are logged with their result and decision.</p>"),
         "APPROACH_STEPS": "".join(f"<li>{s}</li>" for s in [
             "Explore the history behind each alert and record every finding as a measured fact or a labelled assumption.",
-            "Aggregate each alert's transactions into ~330 candidate features in 11 families, plus scores from a transaction-level model.",
+            "Aggregate each alert's transactions into ~470 candidate features in 16 families, plus scores from a transaction-level model.",
             "Judge every family with repeated stratified 5-fold cross-validation (3 fixed repeats) and one acceptance rule: keep a change only if the mean AUC rises by at least 0.0010 and it rises in all three repeats.",
             "Tune, add models to a rank-average ensemble under the same rule, calibrate on training predictions, and predict the hidden alerts."]),
         "SCHEMA": "".join(f"<tr><td>{a}</td><td>{b}</td><td class='n'>{c}</td><td>{d}</td></tr>" for a, b, c, d in [
@@ -210,22 +234,32 @@ def main():
     by_fam = {}
     for a in abl:
         by_fam.setdefault(a["fam"], []).append(a)
-    order = ["fz", "fx", "fp", "ft", "f4", "f3", "f5", "f7", "f6", "txm"]
-    rows_html = [f"<tr><td><b>{FAMILY[f][0]}</b></td><td>{FAMILY[f][1]}</td><td>{FAMILY[f][2]}</td><td class='n'>—</td><td class='n'>—</td>"
-                 f"<td><span class='badge ok'>✓ baseline</span></td></tr>" for f in ("f1", "f2")]
-    for f in order:
+    rlabel = {1: "", 2: " · round 2 (base F1+F2+F7)", 3: " · phase 3", "3R": " · phase 3 re-check (base with fi)"}
+    loo = {r["hyp"].split("вклад ")[1].split(" ")[0]: r for r in log if r["hyp"].startswith("LOO: вклад")}
+    badge_ok, badge_no = "<span class='badge ok'>✓ accepted</span>", "<span class='badge no'>✗ rejected</span>"
+
+    def row(f, label_suffix, d, mean, badge):
+        dd = " / ".join(f"{x:+.4f}" for x in d) if d else "—"
+        mm = f"{mean:+.4f}" if d else "—"
+        return (f"<tr><td><b>{FAMILY[f][0]}</b>{label_suffix}</td><td>{FAMILY[f][1]}</td><td>{FAMILY[f][2]}</td>"
+                f"<td class='n'>{dd}</td><td class='n'>{mm}</td><td>{badge}</td></tr>")
+    rows_html = [row("f1", "", None, None, "<span class='badge ok'>✓ baseline</span>")]
+    if "f2" not in st["families"] and "f2" in loo and loo["f2"]["d"]:
+        d2 = [-x for x in loo["f2"]["d"]]  # contribution of keeping F2 = minus the gain from removing it
+        rows_html.append(row("f2", " · baseline, removed by leave-one-out", d2, float(np.mean(d2)), "<span class='badge no'>✗ removed</span>"))
+    else:
+        rows_html.append(row("f2", "", None, None, "<span class='badge ok'>✓ baseline</span>"))
+    for f in ["fi", "fx", "f7", "fz", "fp", "ft", "f4", "f3", "f5", "f6", "fk", "fl", "fh", "fr", "txm"]:
         for a in by_fam.get(f, []):
-            dd = " / ".join(f"{x:+.4f}" for x in a["d"])
-            badge = "<span class='badge ok'>✓ accepted</span>" if a["ok"] else "<span class='badge no'>✗ rejected</span>"
-            rnd = " (round 2, base F1+F2+F7)" if a["round"] == 2 and f != "txm" else ""
-            rows_html.append(f"<tr><td><b>{FAMILY[f][0]}</b>{rnd}</td><td>{FAMILY[f][1]}</td><td>{FAMILY[f][2]}</td>"
-                             f"<td class='n'>{dd}</td><td class='n'>{a['mean']:+.4f}</td><td>{badge}</td></tr>")
+            rows_html.append(row(f, rlabel.get(a["round"], "") if f != "txm" else "", a["d"], a["mean"], badge_ok if a["ok"] else badge_no))
     acc = [FAMILY[f][0] for f in fams_final]
     rep["FEAT_H2"] = "Most ideas did not survive the acceptance rule — the ones that did: " + ", ".join(acc)
     rep["FEAT_INTRO"] = ("<p>Every family was added to the current best set one at a time and scored on the same 3 × 5 folds; Δ is the change in "
-                         "out-of-fold ROC-AUC in each repeat. Round 1 compared most families against F1+F2, before F7 was accepted, so round 2 "
-                         "re-tested every rejected family against the final base F1+F2+F7. Hyper-parameter tuning and seed averaging did not pass "
-                         "the rule, so both rounds use the same LightGBM.</p>")
+                         "out-of-fold ROC-AUC in each repeat. Round 1 compared most families against F1+F2 and round 2 re-tested the rejected ones "
+                         "against F1+F2+F7. Phase 3 added five new ideas (kNN target mean, class density ratio, histograms, rank transforms, cell "
+                         "interactions); once the interactions were accepted, every family rejected so far was re-tested against the new base, and "
+                         "leave-one-out on the final set removed F2. Hyper-parameter tuning (three variants), seed averaging and monotone "
+                         "constraints did not pass the rule, so every row uses the same LightGBM settings.</p>")
     rep["ABLATION_ROWS"] = "".join(rows_html)
     sel = st.get("selection")
     alone = {}
@@ -235,17 +269,21 @@ def main():
         except FileNotFoundError:
             pass
     strong = [f for f in ("ft", "fx", "f5", "f3") if f in alone]
+    fi_diff = next((r for r in log if r["hyp"].startswith("Фаза 3, измерение: вклад части fi — разности")), None)
+    fi_prod = next((r for r in log if r["hyp"].startswith("Фаза 3, измерение: вклад части fi — произведения")), None)
+    fi_txt = ""
+    if fi_diff and fi_prod and fi_diff["d"] and fi_prod["d"]:
+        fi_txt = (f"The cell-interaction gain comes from the differences between cell levels: removing them changes AUC by "
+                  f"{float(np.mean(fi_diff['d'])):+.4f}, removing the products by {float(np.mean(fi_prod['d'])):+.4f}. ")
     rep["FEAT_NOTE"] = (
-        "Measured, not assumed: scored on its own, F1 reaches " + f"{alone.get('f1', float('nan')):.4f}" + " — practically the whole baseline. "
-        "Several rejected families do carry signal by themselves ("
+        "Measured, not assumed: scored on its own, F1 reaches " + f"{alone.get('f1', float('nan')):.4f}" + ", practically the whole baseline. "
+        "Several rejected families carry signal by themselves ("
         + ", ".join(f"{FAMILY[f][0].split(' · ')[-1]} {alone[f]:.3f}" for f in strong)
         + ") yet add less than the threshold on top of F1, so their information overlaps with the amount statistics. "
-        + f"F7 is the opposite: weak alone ({alone.get('f7', float('nan')):.3f}) but complementary. "
-        + "Null-importance feature selection was "
-        + (f"accepted at threshold {sel['threshold']}." if sel else "tested and rejected."))
+        + fi_txt
+        + "Null-importance feature selection was " + (f"accepted at threshold {sel['threshold']}." if sel else "tested and rejected."))
     # ---- models section
-    ms = {m["label"]: m for m in models}
-    b0 = ms.get("Baseline B0: LightGBM on F1+F2")
+    b0 = next((m for m in models if m["label"].startswith("Baseline B0")), None)
     rep["MODELS_H2"] = (f"From {b0['mean']:.4f} to {fin['mean']:.4f} cross-validated ROC-AUC" if b0 else "Cross-validated results")
     rep["VALIDATION_TEXT"] = ("<p><strong>Why a random stratified split.</strong> Train and test alerts are interleaved over the same months and the escalation "
                               "rate is stable, so a random split reproduces the test situation. A time split (as in Kaggle IEEE-CIS, where test lies after "
@@ -257,34 +295,50 @@ def main():
                               "and applied to every experiment, including ensemble members.</p>")
     mem = ens.get("members", [])
     names = {"lgb": "LightGBM", "xgb": "XGBoost", "cat": "CatBoost", "lrs": "LogReg + splines", "txm": "transaction-level model"}
-    rep["NOTE_MODELS"] = (f"Out-of-fold ROC-AUC, mean ± sd over the three repeats. The submitted ensemble is an {ens.get('kind', 'equal')}-weight rank average of "
-                          + ", ".join(names.get(m, m) for m in mem) + "; Platt scaling fitted on training predictions turns it into probabilities without "
-                          "changing the ranking. Test predictions are mapped to percentiles through each model's training out-of-fold distribution, so "
-                          "nothing is fitted on test.")
+    tail = ("Platt scaling fitted on training out-of-fold predictions turns the score into probabilities without changing the ranking; test "
+            "predictions are mapped through the training out-of-fold distribution, so nothing is fitted on test.")
+    if mem == ["lgb"]:
+        rep["NOTE_MODELS"] = ("Out-of-fold ROC-AUC, mean ± sd over the three repeats. After the cell-interaction features were added, neither XGBoost, "
+                              "CatBoost nor the spline logistic regression improved the LightGBM under the rule (the spline model, accepted as a second "
+                              "ensemble member earlier, now lowered the score), so the submission is the single LightGBM. " + tail)
+    else:
+        rep["NOTE_MODELS"] = (f"Out-of-fold ROC-AUC, mean ± sd over the three repeats. The submitted ensemble is an {ens.get('kind', 'equal')}-weight rank "
+                              "average of " + ", ".join(names.get(m, m) for m in mem) + ". " + tail)
     imp = M["importance"]
     if imp:
-        fam_share = {}
-        for v in imp:
-            fam_share[v["family"]] = fam_share.get(v["family"], 0) + v["share"]
         top3 = ", ".join(f"{v['label']} ({100 * v['share']:.1f} %)" for v in imp[:3])
+        by_f = {}
+        for v in imp:
+            by_f[v["family"]] = by_f.get(v["family"], 0) + 1
         rep["NOTE_IMP"] = (f"Share of total split gain, averaged over the fold models of the final LightGBM. The three largest: {top3}. "
-                           f"Of the top 20, {sum(1 for v in imp if v['family'].startswith('F1'))} are F1 amount statistics.")
+                           "Top-20 by family: " + ", ".join(f"{k} {n}" for k, n in sorted(by_f.items(), key=lambda kv: -kv[1])) + ".")
     else:
         rep["NOTE_IMP"] = "Share of total split gain of the final LightGBM."
-    loo_f2 = next((r for r in log if r["hyp"].startswith("LOO: вклад f2")), None)
+    f2_last = loo.get("f2")
+    f2_first = next((r for r in log if r["hyp"].startswith("LOO: вклад f2")), None)
     f3r = next((a for a in abl if a["fam"] == "f3" and a["round"] == 1), None)
     best_uni = 1 - min(u["auc"] for u in D["univariate"])
+    fi_acc = next((a for a in abl if a["fam"] == "fi" and a["ok"]), None)
+    vol = ""
+    if f2_first and f2_last and f2_first is not f2_last:
+        vol = (f"; the volume family helped at first ({-float(np.mean(f2_first['d'])):+.4f}) but became redundant once the interaction "
+               f"features were in (removing it then gained {float(np.mean(f2_last['d'])):+.4f})")
     rep["CONCLUSIONS"] = ("<p><strong>Amount level is the signal.</strong> Escalated alerts move smaller amounts, most clearly in bank transfers "
-                          f"(density ratio about 1.15 in the smallest band, 0.72 in the largest). Per-type amount levels are correlated "
+                          "(density ratio about 1.15 in the smallest band, 0.72 in the largest). Per-type amount levels are correlated "
                           f"({D['level_corr_min']:.2f}–{D['level_corr_max']:.2f}), and F1 alone reproduces the baseline score.</p>"
-                          "<p><strong>Volume adds a little.</strong> Escalated alerts are "
+                          "<p><strong>Relative levels matter.</strong> The largest single gain"
+                          + (f" ({fi_acc['mean']:+.4f})" if fi_acc else "")
+                          + " came from differences between the amount levels of an alert's own cells, such as outgoing versus incoming bank "
+                          "transfers or each cell versus the alert's overall level. Trees can in principle build such differences, but here "
+                          "giving them explicitly paid off in all three repeats.</p>"
+                          "<p><strong>Volume and timing add little.</strong> Escalated alerts are "
                           f"{100 * (D['lag_ratio_min'] - 1):.0f}–{100 * (D['lag_ratio_max'] - 1):.0f} % more active over the whole window"
-                          + (f"; removing F2 costs {-float(np.mean(loo_f2['d'])):.4f} AUC" if loo_f2 and loo_f2["d"] else "")
-                          + ". The burst family" + (f" gained only {f3r['mean']:+.4f}" if f3r else "") + ", below the acceptance threshold; "
-                          "time of day shows no difference between the classes, and date features were rejected.</p>"
+                          + vol
+                          + ". The burst family" + (f" gained only {f3r['mean']:+.4f}" if f3r else "") + ", time of day shows no difference between the "
+                          "classes, and date features were rejected.</p>"
                           "<p><strong>Weak features, careful validation.</strong> No single aggregate we scored exceeds "
-                          f"AUC {best_uni:.3f}, and most engineered families failed the acceptance rule. The final ensemble reaches "
-                          f"{fin['mean']:.4f} ± {fin['std']:.4f} out-of-fold ROC-AUC.</p>")
+                          f"AUC {best_uni:.3f}; three rounds of hyper-parameter tuning won on the tuning repeats but not on the scoring repeats. "
+                          f"The final model reaches {fin['mean']:.4f} ± {fin['std']:.4f} out-of-fold ROC-AUC.</p>")
     rep["LIMITS"] = ("<p><strong>Assumptions, not facts.</strong> That miqdor_indeksi is a z-scored log amount, that the floors and caps are clipping by the "
                      "data generator, and that the burst is a generation artefact rather than the triggering activity are interpretations; the data "
                      "cannot confirm them.</p>"

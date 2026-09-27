@@ -31,9 +31,14 @@ L.append("- **Reproducible notebook:** [`notebooks/FB203632_pipeline.ipynb`](not
 L.append("- **Plan and fixed validation scheme:** [`PLAN.md`](PLAN.md) · **every experiment:** [`EXPERIMENTS_LOG.md`](EXPERIMENTS_LOG.md) · "
          "**what did not work:** [`ANTI_PATTERNS.md`](ANTI_PATTERNS.md)\n")
 L.append("## Result\n")
-L.append(f"Final ensemble ({ens['kind']} rank average of " + ", ".join(names.get(m, m) for m in ens["members"]) + ", Platt-calibrated on "
-         f"training out-of-fold predictions): **out-of-fold ROC-AUC {fin['mean']:.4f} ± {fin['std']:.4f}** "
-         "(repeated stratified 5-fold, 3 repeats, seeds 42/43/44).\n")
+if ens["members"] == ["lgb"]:
+    L.append(f"Final model: **{fin['label'].split(' (')[0]}**, Platt-calibrated on training out-of-fold predictions (no other model passed "
+             f"the rule as an ensemble member): **out-of-fold ROC-AUC {fin['mean']:.4f} ± {fin['std']:.4f}** "
+             "(repeated stratified 5-fold, 3 repeats, seeds 42/43/44).\n")
+else:
+    L.append(f"Final ensemble ({ens['kind']} rank average of " + ", ".join(names.get(m, m) for m in ens["members"]) + ", Platt-calibrated on "
+             f"training out-of-fold predictions): **out-of-fold ROC-AUC {fin['mean']:.4f} ± {fin['std']:.4f}** "
+             "(repeated stratified 5-fold, 3 repeats, seeds 42/43/44).\n")
 L.append("| Model | r42 | r43 | r44 | mean ± sd |\n|---|---:|---:|---:|---:|")
 for m in models:
     L.append(f"| {m['label']} | {m['r'][0]:.4f} | {m['r'][1]:.4f} | {m['r'][2]:.4f} | {m['mean']:.4f} ± {m['std']:.4f} |")
@@ -42,9 +47,15 @@ L.append("\nThere is no leaderboard (one official submission), so every decision
 L.append("## Feature families and decisions\n")
 L.append("| Family | What it measures | Δ AUC r42 / r43 / r44 | Decision |\n|---|---|---|---|")
 L.append(f"| {FAMILY['f1'][0]} | {FAMILY['f1'][1]} | baseline | ✓ |")
-L.append(f"| {FAMILY['f2'][0]} | {FAMILY['f2'][1]} | baseline | ✓ |")
+loo = {r["hyp"].split("вклад ")[1].split(" ")[0]: r for r in log if r["hyp"].startswith("LOO: вклад")}
+if "f2" not in st["families"] and "f2" in loo and loo["f2"]["d"]:
+    L.append(f"| {FAMILY['f2'][0]} (baseline, then leave-one-out) | {FAMILY['f2'][1]} | " + " / ".join(f"{-x:+.4f}" for x in loo["f2"]["d"])
+             + " | ✗ removed |")
+else:
+    L.append(f"| {FAMILY['f2'][0]} | {FAMILY['f2'][1]} | baseline | ✓ |")
+rl = {1: "", 2: " (round 2)", 3: " (phase 3)", "3R": " (phase 3 re-check)"}
 for a in abl:
-    rnd = " (round 2)" if a["round"] == 2 and a["fam"] != "txm" else ""
+    rnd = rl.get(a["round"], "") if a["fam"] != "txm" else ""
     L.append(f"| {FAMILY[a['fam']][0]}{rnd} | {FAMILY[a['fam']][1]} | " + " / ".join(f"{x:+.4f}" for x in a["d"])
              + f" | {'✓ accepted' if a['ok'] else '✗ rejected'} |")
 L.append("\n## Approach\n")
@@ -53,8 +64,8 @@ L.append("2. **Features** (`src/features.py`): one row per alert, built only fro
          "(normalisation, thresholds, PCA, feature selection, calibration) are fitted on the training folds only; the test set is only transformed.")
 L.append("3. **Validation** (`src/cv.py`): stratified 5-fold × 3 repeats on fixed folds. Train and test alerts are interleaved in time, so a "
          "random split reproduces the test situation; hyper-parameters and selection thresholds were chosen on a separate fourth repeat (seed 100).")
-L.append("4. **Models** (`src/models.py`): LightGBM (CPU), XGBoost and CatBoost (GPU), spline logistic regression; a nested "
-         "transaction-level model (`src/txmodel.py`) was also tested.")
+L.append("4. **Models** (`src/models.py`): LightGBM (CPU), XGBoost (GPU), CatBoost (CPU), spline logistic regression, LightGBM with "
+         "monotone constraints; a nested transaction-level model (`src/txmodel.py`) was also tested.")
 L.append("5. **Ensemble** (`src/final.py`): members enter only if they pass the rule; test predictions become percentiles through each "
          "member's training OOF distribution; Platt scaling is fitted on training OOF.\n")
 L.append("Ideas from past Kaggle competitions with the same structure (Home Credit, AmEx, Elo, IEEE-CIS) were each tested on this data "

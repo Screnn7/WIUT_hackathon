@@ -8,7 +8,7 @@ from sklearn.metrics import roc_auc_score
 
 from .config import N_FOLDS, REPEAT_SEEDS, ROOT, TEAM_ID
 from .cv import run_cv
-from .models import CAT, LGBM, XGB, LRSpline
+from .models import CAT, LGBM, XGB, LGBMMono, LRSpline
 from .selection import null_importance_scores
 
 
@@ -16,6 +16,8 @@ def model_from(spec):
     t = spec["type"]
     if t == "lgb":
         return LGBM(spec.get("params"), spec["n_estimators"])
+    if t == "lgb_mono":
+        return LGBMMono(spec.get("params"), spec["n_estimators"], **spec.get("mono", {}))
     if t == "xgb":
         return XGB(spec.get("params"), spec["n_estimators"])
     if t == "cat":
@@ -91,9 +93,11 @@ def ensemble_and_submit(fs, results, scheme):
     P = {m: oof_pct(results[m]) for m in scheme["members"]}
     oof_s = {s: combine(scheme, [P[m][s] for m in scheme["members"]]) for s in REPEAT_SEEDS}
     auc = {s: float(roc_auc_score(y, oof_s[s])) for s in REPEAT_SEEDS}
-    oof_mean = np.mean([oof_s[s] for s in REPEAT_SEEDS], axis=0)
-    te = combine(scheme, [test_pct(results[m]) for m in scheme["members"]])
+    # rounding removes 1-ulp differences from summing equal rank triples in different order (real gaps are >= ~2e-5)
+    oof_mean = np.round(np.mean([oof_s[s] for s in REPEAT_SEEDS], axis=0), 10)
+    te = np.round(combine(scheme, [test_pct(results[m]) for m in scheme["members"]]), 10)
     platt = LogisticRegression(C=1e6, max_iter=1000).fit(_logit(oof_mean, 1e-6).reshape(-1, 1), y)
+    assert platt.coef_[0][0] > 0, "Platt scaling must be increasing"
     prob_oof = platt.predict_proba(_logit(oof_mean, 1e-6).reshape(-1, 1))[:, 1]
     prob_te = platt.predict_proba(_logit(te, 1e-6).reshape(-1, 1))[:, 1]
     assert abs(roc_auc_score(y, prob_oof) - roc_auc_score(y, oof_mean)) < 1e-9

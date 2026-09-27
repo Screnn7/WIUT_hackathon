@@ -29,7 +29,9 @@ C.append(nbf.v4.new_markdown_cell(
     "1. build per-alert features from each alert's own transactions (no statistic is ever computed on test data);\n"
     "2. recreate the fixed folds (stratified 5-fold × 3 repeats, seeds 42/43/44);\n"
     "3. re-run every ensemble member with the configuration accepted in `EXPERIMENTS_LOG.md`;\n"
-    "4. rank-average the members, calibrate with Platt scaling fitted on training out-of-fold predictions, write `submission/team_FB203632.csv`.\n\n"
+    "4. combine the accepted members by rank average (the final configuration is a single LightGBM: once the cell-interaction features were "
+    "added, no other model passed the rule), calibrate with Platt scaling fitted on training out-of-fold predictions, write "
+    "`submission/team_FB203632.csv`.\n\n"
     "Every choice below was made by an experiment with the acceptance rule of `PLAN.md` §4 (mean OOF AUC +0.0010 and a gain in all three repeats). "
     "The experiment history is in `EXPERIMENTS_LOG.md`; failures and their reasons are in `ANTI_PATTERNS.md`."))
 C.append(nbf.v4.new_code_cell(
@@ -42,9 +44,11 @@ C.append(nbf.v4.new_markdown_cell("## 1. Accepted configuration\n\nCopied from t
                                   "`families` are feature-family prefixes (see `src/features.py`), `spec` the model and its tuned parameters."))
 C.append(nbf.v4.new_code_cell('CONFIG = json.loads(r"""' + json.dumps(CONFIG, indent=1, ensure_ascii=False) + '""")\nprint(json.dumps(CONFIG, indent=1))'))
 C.append(nbf.v4.new_markdown_cell(
-    "## 2. Features from raw data\n\n`FeatureStore(rebuild=True)` re-reads the raw files and recomputes everything. Fold-independent families "
-    "(`f1`…`f7`, `fx`) use only each alert's own transactions; fold-dependent families (`fz`, `fp`, `ft`) are fitted on the training folds inside "
-    "the CV loop. No transaction or alert is dropped (asserted inside `src/data.py`)."))
+    "## 2. Features from raw data\n\n`FeatureStore(rebuild=True)` re-reads the raw files and recomputes everything. The final model uses `f1` "
+    "(amount statistics per type × direction cell), `f7` (recent-vs-history contrasts), `fi` (differences of amount levels between cells) and "
+    "`fx` (means of exp(σ·amount)); all four use only each alert's own transactions. The other families in `src/features.py` and "
+    "`src/features_extra.py` were tested and rejected (`EXPERIMENTS_LOG.md`); fold-dependent ones are fitted on training folds only. "
+    "No transaction or alert is dropped (asserted inside `src/data.py`)."))
 C.append(nbf.v4.new_code_cell(
     "t0 = time.time()\nfs = FeatureStore(rebuild=True)\n"
     "print('alerts train/test:', len(fs.y), len(fs.sig['test']), '| transactions train/test:', len(fs.tx['train']), len(fs.tx['test']))\n"

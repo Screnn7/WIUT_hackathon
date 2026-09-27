@@ -36,6 +36,38 @@ class LGBM:
         return m.predict_proba(Xva)[:, 1], m.predict_proba(Xte)[:, 1], {"best_iter": it, "gain": gain}
 
 
+class LGBMMono(LGBM):
+    """LightGBM with monotone constraints. The direction of each feature is the sign of its univariate AUC − 0.5 on the
+    training fold (constrained only if |AUC − 0.5| ≥ threshold); nothing is derived from validation or test data."""
+    name = "lgb_mono"
+
+    def __init__(self, params=None, n_estimators=1000, threshold=0.02, method="intermediate"):
+        super().__init__(params, n_estimators)
+        self.threshold, self.method = threshold, method
+
+    def constraints(self, Xtr, ytr):
+        from sklearn.metrics import roc_auc_score
+        cons = []
+        for c in Xtr.columns:
+            v = Xtr[c].to_numpy(np.float64)
+            ok = ~np.isnan(v)
+            if ok.sum() < 200 or np.unique(v[ok]).size < 3 or np.unique(ytr[ok]).size < 2:
+                cons.append(0)
+                continue
+            a = roc_auc_score(ytr[ok], v[ok]) - 0.5
+            cons.append(int(np.sign(a)) if abs(a) >= self.threshold else 0)
+        return cons
+
+    def fit_predict(self, Xtr, ytr, Xva, yva, Xte, seed):
+        cons = self.constraints(Xtr, ytr)
+        p = {**self.params, "monotone_constraints": cons, "monotone_constraints_method": self.method}
+        m = lgb.LGBMClassifier(**p, n_estimators=self.n_estimators, random_state=seed)
+        m.fit(Xtr, ytr)
+        gain = dict(zip(Xtr.columns, m.booster_.feature_importance("gain").tolist()))
+        return (m.predict_proba(Xva)[:, 1], m.predict_proba(Xte)[:, 1],
+                {"best_iter": self.n_estimators, "gain": gain, "n_constrained": int(np.abs(cons).sum())})
+
+
 XGB_BASE = dict(tree_method="hist", device="cuda", learning_rate=0.02, max_depth=4, min_child_weight=20,
                 subsample=0.8, colsample_bytree=0.5, reg_lambda=5.0, eval_metric="auc", max_bin=256)
 
