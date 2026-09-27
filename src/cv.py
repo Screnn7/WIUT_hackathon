@@ -1,4 +1,4 @@
-"""Repeated stratified K-fold harness (PLAN.md §4), fixed folds on disk, OOF/test storage."""
+"""Repeated stratified K-fold harness (5 folds x 3 repeats), fixed folds on disk, OOF/test storage."""
 import pickle
 import time
 

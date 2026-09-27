@@ -161,7 +161,7 @@ html{scroll-behavior:smooth}
 <section id="approach">
   <div class="sec-head"><p class="eyebrow">Approach</p><h2>One alert, one row: summarise the history, then let cross-validation decide</h2></div>
   <div class="stack">
-    <div class="prose"><p>The transaction table is relational: 6,987,663 training transactions belong to 14,000 alerts, and the target lives on the alert. We therefore summarise each alert's own history into one row of features and model at the alert level. No statistic is ever computed on the test set, and every fitted quantity (thresholds, normalisation, feature selection, calibration) is fitted inside the training folds.</p><p>Ideas were borrowed from past Kaggle competitions with the same structure (Home Credit, AmEx, Elo, IEEE-CIS). Each was first tested on this data; 123 experiments are logged with their result and decision.</p></div>
+    <div class="prose"><p>The transaction table is relational: 6,987,663 training transactions belong to 14,000 alerts, and the target lives on the alert. We therefore summarise each alert's own history into one row of features and model at the alert level. No statistic is ever computed on the test set, and every fitted quantity (thresholds, normalisation, feature selection, calibration) is fitted inside the training folds.</p><p>Ideas were borrowed from past Kaggle competitions with the same structure (Home Credit, AmEx, Elo, IEEE-CIS). Each was first tested on this data; in total 123 experiments were run, each accepted or rejected by the same rule.</p></div>
     <ol class="steps"><li>Explore the history behind each alert and record every finding as a measured fact or a labelled assumption.</li><li>Aggregate each alert's transactions into ~470 candidate features in 16 families, plus scores from a transaction-level model.</li><li>Judge every family with repeated stratified 5-fold cross-validation (3 fixed repeats) and one acceptance rule: keep a change only if the mean AUC rises by at least 0.0010 and it rises in all three repeats.</li><li>Tune, add models to a rank-average ensemble under the same rule, calibrate on training predictions, and predict the hidden alerts.</li></ol>
   </div>
 </section>
@@ -309,10 +309,9 @@ html{scroll-behavior:smooth}
 <section id="reproduce">
   <div class="sec-head"><p class="eyebrow">Reproduce</p><h2>Everything runs from the repository</h2></div>
   <div class="stack">
-    <div class="prose"><p>Code, experiment log and the reproducible notebook are in the <a href='https://github.com/Screnn7/WIUT_hackathon'>repository</a>. Put the four data files into <code>data/</code>, create the environment, then run the notebook: it rebuilds the features, re-runs the final models on the fixed folds and writes the submission file.</p></div>
+    <div class="prose"><p>The pipeline code and the reproducible notebook are in the <a href='https://github.com/Screnn7/WIUT_hackathon'>repository</a>. Put the four data files into <code>data/</code>, create the environment, then run the notebook: it rebuilds the features from the raw files, trains the final model on the fixed folds, checks the scores against the reference values and writes the submission file (about a minute on a laptop CPU).</p></div>
     <pre>python -m venv .venv &amp;&amp; .venv/Scripts/pip install -r requirements.txt
-jupyter nbconvert --to notebook --execute notebooks/FB203632_pipeline.ipynb --output FB203632_pipeline.ipynb
-# or, step by step: experiments/phase2.py, phase2_models.py, phase2_txmodel.py, phase2_ensemble.py</pre>
+jupyter nbconvert --to notebook --execute notebooks/FB203632_pipeline.ipynb --output FB203632_pipeline.ipynb</pre>
   </div>
 </section>
 </main>

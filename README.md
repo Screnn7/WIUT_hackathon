@@ -4,7 +4,6 @@ Predict the probability that an AML monitoring alert is **escalated** (`eskalats
 
 - **EDA website:** https://screnn7.github.io/WIUT_hackathon/
 - **Reproducible notebook:** [`notebooks/FB203632_pipeline.ipynb`](notebooks/FB203632_pipeline.ipynb)
-- **Plan and fixed validation scheme:** [`PLAN.md`](PLAN.md) · **every experiment:** [`EXPERIMENTS_LOG.md`](EXPERIMENTS_LOG.md) · **what did not work:** [`ANTI_PATTERNS.md`](ANTI_PATTERNS.md)
 
 ## Result
 
@@ -63,24 +62,21 @@ There is no leaderboard (one official submission), so every decision rests on cr
 
 ## Approach
 
-1. **EDA** (`eda/`): every finding was recomputed by an independent script (`eda/verify_claims.py`) and labelled fact or assumption.
+1. **EDA** (see the website): every finding was recomputed by an independent script and labelled fact or assumption.
 2. **Features** (`src/features.py`): one row per alert, built only from the alert's own transactions. Fold-dependent statistics (normalisation, thresholds, PCA, feature selection, calibration) are fitted on the training folds only; the test set is only transformed.
-3. **Validation** (`src/cv.py`): stratified 5-fold × 3 repeats on fixed folds. Train and test alerts are interleaved in time, so a random split reproduces the test situation; hyper-parameters and selection thresholds were chosen on a separate fourth repeat (seed 100).
-4. **Models** (`src/models.py`): LightGBM (CPU), XGBoost (GPU), CatBoost (CPU), spline logistic regression, LightGBM with monotone constraints; a nested transaction-level model (`src/txmodel.py`) was also tested.
+3. **Validation** (`src/cv.py`): stratified 5-fold × 3 repeats on fixed folds. Train and test alerts are interleaved in time, so a random split reproduces the test situation; hyper-parameters and selection thresholds were chosen on separate tuning repeats (seeds 100, 101).
+4. **Models** (`src/models.py`): LightGBM, XGBoost, CatBoost, spline logistic regression and LightGBM with monotone constraints were compared; a nested transaction-level model was also tested. The final model is a single LightGBM.
 5. **Ensemble** (`src/final.py`): members enter only if they pass the rule; test predictions become percentiles through each member's training OOF distribution; Platt scaling is fitted on training OOF.
 
-Ideas from past Kaggle competitions with the same structure (Home Credit, AmEx, Elo, IEEE-CIS) were each tested on this data before adoption; the checks are logged as experiments.
+Ideas from past Kaggle competitions with the same structure (Home Credit, AmEx, Elo, IEEE-CIS) were each tested on this data before adoption; the result of each check is shown on the website.
 
 ## Repository layout
 
 ```
-src/              data loading, features, CV harness, models, selection, transaction model, final pipeline
-experiments/      scripts that ran every logged experiment (phase2*.py) and feature verification
-eda/              phase-1 EDA script, figures, independent claim checks
-notebooks/        reproducible end-to-end notebook (+ generator)
-site_builder/     builds the EDA website into docs/ (GitHub Pages)
-docs/             the published website
-PLAN.md · EXPERIMENTS_LOG.md · ANTI_PATTERNS.md · CLAUDE.md (working rules)
+notebooks/FB203632_pipeline.ipynb   reproducible end-to-end notebook (executed)
+src/                                data loading, feature families, CV harness, models, final pipeline
+docs/                               the EDA website (GitHub Pages)
+requirements.txt                    pinned package versions
 ```
 
 ## Reproduce
@@ -89,9 +85,9 @@ Place the organisers' files in `data/` (`train_signals.csv`, `test_signals.csv`,
 
 ```bash
 python -m venv .venv
-.venv/Scripts/pip install -r requirements.txt   # Python 3.12; XGBoost/CatBoost use a CUDA GPU
+.venv/Scripts/pip install -r requirements.txt   # Python 3.12; the final model runs on CPU
 jupyter nbconvert --to notebook --execute notebooks/FB203632_pipeline.ipynb --output FB203632_pipeline.ipynb
 ```
 
-The notebook rebuilds the features from raw files, recreates the fixed folds, re-runs every ensemble member, and writes `submission/team_FB203632.csv` (6,000 rows, `signal_id,ehtimollik`). The raw data and the prediction file are not committed.
+The notebook rebuilds the features from the raw files, recreates the fixed folds, trains the final model, compares the out-of-fold ROC-AUC with the reference values and writes `submission/team_FB203632.csv` (6,000 rows, `signal_id,ehtimollik`) in about a minute on a laptop CPU. The raw data and the prediction file are not committed.
 
